@@ -1,0 +1,11 @@
+# Keep line endings sane across platforms.
+* text=auto
+
+# Windows batch scripts must be CRLF to be safe when run directly.
+*.cmd text eol=crlf
+scripts/install/*.txt text eol=crlf
+
+*.cs   text eol=lf
+*.py   text eol=lf
+*.md   text eol=lf
+*.csproj text eol=lf

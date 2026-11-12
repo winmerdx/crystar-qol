@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Crystar.QoL —— 旧式（非 SDK）工程文件。
+
+  为什么不用 SDK 风格：SDK 风格必须跑 NuGet 还原才能拿到 net472 引用程序集，
+  而还原依赖 %APPDATA% 等用户环境变量，在受限/沙箱环境里会直接崩
+  （NuGet.targets: Value cannot be null. (Parameter 'path1')）。
+  本机也没有装 .NET Framework 4.7.2 targeting pack。
+
+  这里改用 FrameworkPathOverride 直接指向工作区里已缓存的引用程序集，
+  全程离线、零 NuGet 依赖，换任何机器都能 dotnet build。
+-->
+<Project ToolsVersion="Current" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <OutputType>Library</OutputType>
+    <RootNamespace>CrystarQoL</RootNamespace>
+    <AssemblyName>Crystar.QoL</AssemblyName>
+    <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
+    <OutputPath>..\..\build\Crystar.QoL\</OutputPath>
+    <LangVersion>9.0</LangVersion>
+    <Optimize>true</Optimize>
+    <DebugType>none</DebugType>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <NoStdLib>true</NoStdLib>
+    <NoConfig>true</NoConfig>
+    <WarningLevel>4</WarningLevel>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <IntermediateOutputPath>obj\$(Configuration)\</IntermediateOutputPath>
+
+    <RefAsmDir>$(MSBuildThisFileDirectory)..\..\.nuget\microsoft.netframework.referenceassemblies.net472\1.0.3\build\.NETFramework\v4.7.2</RefAsmDir>
+    <FrameworkPathOverride>$(RefAsmDir)</FrameworkPathOverride>
+
+    <MelonLoaderDir>$(MSBuildThisFileDirectory)..\..\tools\melonloader057\MelonLoader</MelonLoaderDir>
+    <DummyDllDir>$(MSBuildThisFileDirectory)..\..\dump\DummyDll</DummyDllDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="**\*.cs" Exclude="obj\**\*.cs;bin\**\*.cs" />
+  </ItemGroup>
+
+  <!-- 基础类库 -->
+  <ItemGroup>
+    <Reference Include="mscorlib" />
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+  </ItemGroup>
+
+  <!-- MelonLoader / Harmony -->
+  <ItemGroup>
+    <Reference Include="MelonLoader"><HintPath>$(MelonLoaderDir)\MelonLoader.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="0Harmony"><HintPath>$(MelonLoaderDir)\0Harmony.dll</HintPath><Private>False</Private></Reference>
+  </ItemGroup>
+
+  <!-- 游戏 IL2CPP 程序集（Il2CppDumper 转储，仅供编译期引用） -->
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp"><HintPath>$(DummyDllDir)\Assembly-CSharp.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="Assembly-CSharp-firstpass"><HintPath>$(DummyDllDir)\Assembly-CSharp-firstpass.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="Il2CppDummyDll"><HintPath>$(DummyDllDir)\Il2CppDummyDll.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="UnityEngine"><HintPath>$(DummyDllDir)\UnityEngine.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(DummyDllDir)\UnityEngine.CoreModule.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="UnityEngine.UIModule"><HintPath>$(DummyDllDir)\UnityEngine.UIModule.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="UnityEngine.TextRenderingModule"><HintPath>$(DummyDllDir)\UnityEngine.TextRenderingModule.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="UnityEngine.UI"><HintPath>$(DummyDllDir)\UnityEngine.UI.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="UnityEngine.SharedInternalsModule"><HintPath>$(DummyDllDir)\UnityEngine.SharedInternalsModule.dll</HintPath><Private>False</Private></Reference>
+  </ItemGroup>
+
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>

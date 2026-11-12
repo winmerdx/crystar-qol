@@ -1,0 +1,27 @@
+# Build output
+build/
+bin/
+obj/
+dist/
+
+# NuGet / reference assemblies (restored locally, large and reproducible)
+.nuget/
+
+# Third-party tools and framework copies (download separately, see README)
+tools/
+ref/
+
+# Il2CppDumper output — game-derived, must be generated locally, never committed
+dump/
+out/
+
+# Release archives
+*.zip
+*.7z
+*.rar
+
+# Logs and editor noise
+*.log
+*.user
+*.suo
+.vs/
