@@ -5,6 +5,7 @@ A quality-of-life mod for **CRYSTAR** (Spike Chunsoft, Unity IL2CPP), built on *
 **NexusMods page:** https://www.nexusmods.com/crystar/mods/4
 **Current version:** 0.3
 **Author:** winmerdx
+**Download the released archive:** https://github.com/winmerdx/crystar-qol/releases/download/v0.3/Crystar.QoL-v0.3.zip
 
 This repository is the public source-code home of the mod. It exists so that the source, the build steps and the packaging pipeline of the released file are fully auditable — including the one place where a third-party binary is modified (see [The 6-byte console patch](#the-6-byte-console-patch)).
 
