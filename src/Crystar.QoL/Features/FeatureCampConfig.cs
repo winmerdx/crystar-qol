@@ -359,9 +359,7 @@ namespace CrystarQoL.Features
             { "f.grant.free",    "思裝變容無消耗" },
             { "f.deathcry.fifo",   "幽怨滿時頂替最早" },
             { "f.deathcry.expand", "幽怨槽池擴容20" },
-            // v0.2.10 修正十四（r15）：r14 的兩個配套開關當初漏了營地行 ⇒ 補上（簡繁英三表同步）
-            { "f.deathcry.icon",   "幽怨圖標跟隨上限" },
-            { "f.deathcry.scale",  "幽怨計數隨上限" },
+            // r27：兩個配套開關已移除（圖標併入主開關 / 計數縮放廢棄）⇒ 三張語言表同步刪鍵。
             { "f.skill.all",     "全技能解鎖" },
             { "camp.back",       "返回上一級" },
             { "f.move",          "移速倍率" },
@@ -472,12 +470,12 @@ namespace CrystarQoL.Features
             // ⚠ f.crymode **不在**这一组里（v0.2.10-r5 起已去掉 warn，见上方 375~379 行）。
             MainRows.Add(CampRow.CycleBool("f.skill.all",     "Crystar.QoL.growth", "AllSkills", warn: true));
             // 修正十（r11）：幽怨满时顶替最早（默认开）/ 槽池扩容到 20（默认关）。
-            // ⚠ 二者不要同开：扩容后 UI 只认 10（mDeathCryCharaID 硬编码 10 格），FIFO 才是对的解。
+            // ⚠ r27 订正：旧注释「二者不要同开、扩容后 UI 只认 10」已**过时** ——
+            //   10.58 的两套账自愈 + r27 图标无条件跟随已解决该问题；现语义是
+            //   「先扩到 20，20 满了再顶替」，二者可同开。
             MainRows.Add(CampRow.CycleBool("f.deathcry.fifo",   "Crystar.QoL.growth", "DeathcryFifo"));
             MainRows.Add(CampRow.CycleBool("f.deathcry.expand", "Crystar.QoL.growth", "DeathcryPoolExpand"));
-            // 修正十四（r15）：r14 加了配置项却忘了加营地行 —— 游戏里看不到 = 等于没做。
-            MainRows.Add(CampRow.CycleBool("f.deathcry.icon",   "Crystar.QoL.growth", "DeathcryIconExpand"));
-            MainRows.Add(CampRow.CycleBool("f.deathcry.scale",  "Crystar.QoL.growth", "DeathcryCountScale"));
+            // r27：删掉 `f.deathcry.icon` / `f.deathcry.scale` 两行（五处齐改之一）。
             // v0.3 批次 4 / A7：手动调整等级数。放在「養成」末尾（等级属养成，铁律 50 按用途归类）。
             // ⚠ warn 不在入口行上：真正不可逆的是子页里的「套用等級」动作行，那里才需要二次确认。
             MainRows.Add(CampRow.Page("f.level", false, CampPage.Level));

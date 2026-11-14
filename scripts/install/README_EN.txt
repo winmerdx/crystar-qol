@@ -21,7 +21,25 @@ so the game plays like vanilla until you change something.
   -> Manage -> Browse local files.
 
 
-2  Menu and keys
+2  Updating to a new version
+────────────────────────────────────────────
+  Already have an older version? Just install over it -
+  no need to uninstall first:
+
+  1  Close the game
+  2  Extract the new package and put the whole Crystar.QoL
+     folder in the game folder, replacing the old one
+  3  Run install.cmd inside it
+  4  Start the game from your Steam Library
+
+  Your settings and save snapshots are kept, never overwritten.
+  The installer prints "files will be updated" when it finds an
+  existing install.
+  Do not delete UserData\Crystar.QoL\backup\ after uninstalling,
+  or your settings cannot be restored on the next install.
+
+
+3  Menu and keys
 ────────────────────────────────────────────
   Press F2 to open / close the mod menu.
   With a controller, use the in-game menu instead:
@@ -39,7 +57,7 @@ so the game plays like vanilla until you change something.
   Changes apply immediately and are saved when the menu closes.
 
 
-3  What's in the menu
+4  What's in the menu
 ────────────────────────────────────────────
   Options are grouped; use Left/Right to change, Enter to apply:
 
@@ -62,7 +80,7 @@ so the game plays like vanilla until you change something.
   Unlock all memoirs has not been tested. Use "Backup save" first.
 
 
-4  Uninstall
+5  Uninstall
 ────────────────────────────────────────────
   Close the game, then run CrystarQoL_uninstall.cmd
   in the game folder and type YES.

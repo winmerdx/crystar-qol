@@ -76,6 +76,11 @@ namespace CrystarQoL.Features
         /// <summary>金额上限：只做整数溢出防御，金钱不受 99 的单格限制。</summary>
         private const int MaxMoney = 1000000000;
 
+        // v0.3 修复（2026-11-14）：幽怨 eItemID 区间，dump 枚举 DEATHCRY_001=237 .. DEATHCRY_025=261。
+        // ConstItemParameter.mMaxCount 全 = 1 ⇒ 每种幽怨各占 1 个独立槽位、不可叠加。
+        private const int DeathcryIdMin = 237;
+        private const int DeathcryIdMax = 261;
+
         private MelonPreferences_Entry<float> _countMult;
         private MelonPreferences_Entry<bool> _rateMax;
 
@@ -249,6 +254,16 @@ namespace CrystarQoL.Features
                     // 但绝不能套用道具的 99 上限。
                     bool isMoney = itemId == 0;
 
+                    // ⛔⛔ v0.3 修复（2026-11-14）：幽怨不吃掉落数量倍率。
+                    // ItemManager.AddItem(0x36F20) @0x37038 判 `mCount + count > mMaxCount`；
+                    // 幽怨 mMaxCount=1 ⇒ 第 2 个同 ID 起跳 0x371F3 ERROR_OVER_ITEM_COUNT
+                    // → BattleManager.AddItem(0x1B6A20) @0x1B6B01 拿到 null
+                    // → 0x1B6EA8 AddActionLogGetItemCountOver（"已无法获取更多幽怨"）。
+                    // 倍率 x10 会把 1 个幽怨放大成 10 个同 ID ⇒ 后 9 个必然整笔丢弃并刷屏误报，
+                    // 而玩家同时看到"槽位还在增加"（不同 ID 的幽怨照常入包），误判成扩容坏了。
+                    // ⇒ eDropType.DEATHCRY(=1) 或 ID 落在幽怨区间 ⇒ 保持原生 count=1。
+                    if (type == 1 || (itemId >= DeathcryIdMin && itemId <= DeathcryIdMax)) return;
+
                     float m = CountMult;
                     int before = c.Count;
                     if (before <= 0) return;
@@ -308,7 +323,11 @@ namespace CrystarQoL.Features
                 try
                 {
                     if (!InDropScope) return;
-                    if ((int)__0 == 0) return;   // 金钱不走道具入账
+                    int id = (int)__0;
+                    if (id == 0) return;         // 金钱不走道具入账
+                    // 同 DropSpawnPatch：幽怨 mMaxCount=1，放大 count 只会制造
+                    // ERROR_OVER_ITEM_COUNT + "已无法获取更多幽怨" 误报（v0.3 修复）。
+                    if (id >= DeathcryIdMin && id <= DeathcryIdMax) return;
                     float m = CountMult;
                     int before = __2;
                     if (before <= 0) return;

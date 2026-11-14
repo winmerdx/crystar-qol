@@ -92,12 +92,10 @@ namespace CrystarQoL
             { "f.grant.free",     "思装变容无消耗" },
             { "f.skill.all",      "全技能解锁" },
             // v0.2.10 修正十（r11）：幽怨满了怎么办
+            // r27（2026-11-14）：三个开关收敛为「扩容主开关 + FIFO 独立」。
+            //   图标跟随已并入主开关、计数缩放整体移除 ⇒ 两个死键同步删除（简/繁/英三表齐改）。
             { "f.deathcry.fifo",  "幽怨满时顶替最早" },
             { "f.deathcry.expand","幽怨槽池扩容20" },
-            // v0.2.10 修正十四（r15，营地行补齐）：r14 的两个配套开关当初只注册了
-            // MelonPreferences、**忘了加营地行** ⇒ 游戏里根本看不到，等于没做。
-            { "f.deathcry.icon",  "幽怨图标跟随上限" },
-            { "f.deathcry.scale", "幽怨计数随上限" },
             { "camp.back",        "返回上一级" },
             { "f.item.done",      "已生成" },
             { "f.item.fail",      "取不到数据" },
@@ -226,9 +224,8 @@ namespace CrystarQoL
             { "f.grant.free",     "Free transmute (no mats)" },
             { "f.skill.all",      "Unlock all skills" },
             { "f.deathcry.fifo",  "Drop oldest Deathcry when full" },
+            // r27：图标跟随并入主开关 / 计数缩放废弃 ⇒ 两行死键删除（简表 / 繁体表同步）
             { "f.deathcry.expand","Enlarge Deathcry pool to 20" },
-            { "f.deathcry.icon",  "Deathcry icons follow cap" },
-            { "f.deathcry.scale", "Deathcry count scaled to cap" },
             { "camp.back",        "Back" },
             { "f.item.done",      "spawned" },
             { "f.item.fail",      "no data" },

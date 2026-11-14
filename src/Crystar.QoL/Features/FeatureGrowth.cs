@@ -168,19 +168,15 @@ namespace CrystarQoL.Features
         /// <summary>修正十（r11）：幽怨槽池满时**自动顶掉最早获取的那个**（默认开）。</summary>
         private MelonPreferences_Entry<bool> _deathcryFifo;
         /// <summary>修正十（r11）：把幽怨槽池从 10 补到 <see cref="DeathcryPoolTarget"/>（默认**关**）。
-        /// 与 FIFO 二选一即可；同开时先扩容、满了再顶替。</summary>
+        /// 与 FIFO 二选一即可；同开时先扩容、满了再顶替。
+        /// ⚠ r27（2026-11-14）：**图标跟随已并入本开关**——原 `DeathcryIconExpand` 独立开关
+        /// 已删除。理由：图标不跟随只会造「池子 20 / 显示 10」的坏状态，没有独立价值。
+        /// 关掉本开关时 `EnsureDeathcryIcons` 的 `cap &lt;= 10` 分支负责还原原版 10 颗布局。</summary>
         private MelonPreferences_Entry<bool> _deathcryPoolExpand;
-        /// <summary>修正十三（r14）：HUD/净化页的**幽怨图标个数**跟随上限（默认开）。
-        /// 原版图标是 prefab 里写死的 10 个 `UIDeathCryIconContent`；`UIFooterContent.UpdateDeathCryCount`
-        /// (0xEE0A0) 取 `GetHaveItemList(7).Count` 与图标数取小 ⇒ 超过 10 个就显示不下。
-        /// 本开关在图标列表里 **Instantiate 补足** 到上限个数。</summary>
-        private MelonPreferences_Entry<bool> _deathcryIconExpand;
-        /// <summary>修正十三（r14）：把 `UserParameter.GetDeathCryCount()`(0x1EBB00) 的返回值
-        /// 按 `ceil(持有数 * 10 / 上限)` 缩放（默认**关**，实验性）。
-        /// 目的：游戏里所有"满幽怨"判定都是 `count &gt;= Global.MAX_HAVE_ITEM_DEATHCRY(10)`
-        /// （编译期常量，改不了）⇒ 缩放后"满"正好发生在**扩容后的上限**而不是 10。
-        /// ⚠ 副作用：依赖该计数的任务/成就判定也会被缩放 ⇒ 默认关，需要时再开。</summary>
-        private MelonPreferences_Entry<bool> _deathcryCountScale;
+        // ⛔ r27 已删除 `_deathcryIconExpand` / `_deathcryCountScale` 两个配置项：
+        //   图标跟随 → 无条件跟随 DeathcryCap()（不再有独立开关）；
+        //   计数缩放 → 整体移除（10.32：奖杯 #43「界限状况」判据是 after == mCount 严格相等，
+        //   缩放会跳过命中值）；`GetDeathCryCount` 补丁只保留「登记表 0 / 实体 >0」的自愈兜底。
 
         private bool _enhWasOn;
         private bool _skillWasOn;
@@ -230,8 +226,22 @@ namespace CrystarQoL.Features
         private static UnityEngine.Vector3 _iconBaseFirst;   // 原第 1 颗的 localPosition
         private static UnityEngine.Vector3 _iconBaseStep;    // 原相邻两颗的间距
         private static UnityEngine.Vector3 _iconBaseScale;   // 原图标的 localScale
-        /// <summary>r15：已经补过图标的那一个 `UIFooterContent` 实例（换场景重建后会重新补）。</summary>
-        private static object _iconExpandedFooter;
+        // ── r27-fix：图标布局幂等 / 边沿触发状态 ──
+        // ⚠ 旧的 `_iconExpandedFooter`（r15「这个实例补过没」）已删除：
+        //   幂等缓存改用 (cap, 列表长度)，主动触发只借 `_iconActiveFooter` 的实例引用。
+        /// <summary>OnUpdate 上一帧看到的 cap（20↔10 边沿检测；边沿那一帧同时同步数量与图标，见 10.63）。</summary>
+        private static int _iconLastCap = -1;
+        /// <summary>上一次真正应用的 cap / 列表长度 ⇒ 两者都没变就零开销返回。
+        /// ⛔ 不要用 footer 实例引用做键：IL2CPP 代理每次可能换新的托管包装，ReferenceEquals 恒 false。</summary>
+        private static int _iconAppliedCap = -1;
+        private static int _iconAppliedCount = -1;
+        /// <summary>Prefix 见过的最新 `UIFooterContent`，供 OnUpdate 主动同步时用（不等 HUD 重绘）。</summary>
+        private static object _iconActiveFooter;
+        /// <summary>关扩容时被裁掉的图标，再开扩容优先复用 ⇒ 反复开关不会累积 GameObject。</summary>
+        private static readonly List<object> _iconSpare = new List<object>();
+        /// <summary>r27-fix3：正在主动请求游戏重绘 ⇒ 该次 `UpdateDeathCryCount` 的 Prefix 跳过布局调整
+        /// （列表已由 SyncDeathcryCapEdge 补/裁过，游戏原方法体只管按持有数设亮/暗）。</summary>
+        private static bool _iconRedrawing;
         /// <summary>思装变容表原值备份：键 = **表内下标**，值 = [num1..num4]。
         /// ⛔ 修正十六（r17）：键从"对象指针"改成"表内下标"——理由见 <see cref="ApplyEnhanceFree"/> 顶部的实锤。</summary>
         private readonly Dictionary<int, int[]> _grantBackup = new Dictionary<int, int[]>();
@@ -289,6 +299,14 @@ namespace CrystarQoL.Features
         /// 因为强化窗口共用同一个抑制旗，Finalizer 需要能区分这一轮到底是谁开的窗。
         /// </summary>
         private static bool _creWin;
+        /// <summary>v0.3 修复：净化窗口的**观测**标记，与「是否抑制扣料」解耦。
+        /// ⛔ 旧实现把两套账量测 / 产出件数 / AddItem 失败数全挂在 <see cref="_creWin"/> 上，
+        /// 而它只有「净化幽怨无消耗=ON」才置真 ⇒ 开关 OFF 时那几次净化一条诊断都不落盘，
+        /// 玩家报「净化产出 0 件」时日志完全空白（2026-11-14 实机）。
+        /// ⇒ 现在每次 <c>ItemCreation</c> 都置真，Finalizer 无条件打印观测结果。</summary>
+        private static bool _creProbe;
+        /// <summary>本轮净化窗口的「净化幽怨无消耗」开关快照（只用于日志，避免读两次配置）。</summary>
+        private static bool _creFreeOn;
         /// <summary>本轮净化窗口内被拦下的 <c>SubItem(eItemID,int)</c> 次数。</summary>
         private static int _creSubIdHits;
         /// <summary>修正九（r10）诊断：被拦下的那批里 <c>count &gt; 0</c> 的笔数与总扣量。
@@ -327,15 +345,14 @@ namespace CrystarQoL.Features
             //   键名沿用 `FreeCreation`（配置向后兼容，老 settings.cfg 里的值继续生效）⇒ 现在只代表净化。
             _allSkills = c.Bool("AllSkills", false, "Unlock all skills / 全技能解锁");
             // 修正十（r11）：幽怨满了怎么办 —— FIFO 顶替（默认开）/ 扩容（默认关）
+            // r27（2026-11-14）：三个开关收敛为「1 主开关 + FIFO 独立」。
+            //   主开关内部同时驱动槽池、图标；计数缩放整体移除（见 10.32 奖杯风险）。
+            //   ⚠ 老 settings.cfg 里的 DeathcryIconExpand / DeathcryCountScale 会成为未知键被
+            //      Load() 忽略、Save() 回写时自动消失 —— 这是**主动废弃**，不是铁律 56 的误删。
             _deathcryFifo = c.Bool("DeathcryFifo", true,
                 "Auto-drop oldest Deathcry when full / 幽怨满时自动顶掉最早的那个");
             _deathcryPoolExpand = c.Bool("DeathcryPoolExpand", false,
-                "Enlarge Deathcry slot pool to 20 / 幽怨槽池扩容到 20（上限开关，关掉会回落到 10）");
-            // 修正十三（r14）
-            _deathcryIconExpand = c.Bool("DeathcryIconExpand", true,
-                "Deathcry icon count follows the cap / 幽怨图标数量跟随上限（超过 10 时补足图标）");
-            _deathcryCountScale = c.Bool("DeathcryCountScale", false,
-                "Scale Deathcry count to the cap / 幽怨计数按上限缩放（让「满」发生在 20 而不是 10，实验性）");
+                "Enlarge Deathcry pool to 20 (icons follow automatically) / 幽怨槽池扩容到 20（图标自动跟随；关掉回落到 10）");
 
             // ── 扣除层：**只挂实例方法** ──
             // ⛔⛔ v0.2.10-r7 铁律级修正：本环境（MelonLoader 0.5.7 + HarmonyX + Il2Cpp）里
@@ -379,8 +396,9 @@ namespace CrystarQoL.Features
             Safe(ctx.Harmony, typeof(DeathcryFifoPatch), "ItemManager.AddItem（幽怨 FIFO 顶替）");
             // 修正十一（r12）：拦下净化收尾的 ClearDeathCryCharaID() —— 不解这一步，净化会被永久锁死
             Safe(ctx.Harmony, typeof(DeathcryClearGuardPatch), "UserParameter.ClearDeathCryCharaID（保留幽怨登记表）");
-            // 修正十三（r14）：GetDeathCryCount() 缩放（默认关）—— 让"满幽怨"判定发生在扩容后的上限
-            Safe(ctx.Harmony, typeof(DeathcryCountScalePatch), "UserParameter.GetDeathCryCount（上限缩放，默认关）");
+            // r27：GetDeathCryCount() 现在**只做两套账自愈**（登记表 0 / 实体 >0 ⇒ 门闸放行）。
+            //   原「按上限缩放」段已随 DeathcryCountScale 开关一起删除（10.32 奖杯风险），挂点保留。
+            Safe(ctx.Harmony, typeof(DeathcryCountScalePatch), "UserParameter.GetDeathCryCount（两套账自愈）");
 
             PatchSelfCheck(ctx.Harmony);
         }
@@ -521,6 +539,11 @@ namespace CrystarQoL.Features
 
         public void OnUpdate()
         {
+            // r27-fix4：cap 边沿全同步（数量 + 图标）放在**最外层**，不受任何开关/节流条件限制。
+            //   它是「开关刚变」这一事件的唯一即时入口；下面的 2s 重放只作场景重建 / 捡幽怨 /
+            //   其它路径导致持有数漂移时的兜底，不再是数量同步的主触发点（铁律 10.63）。
+            SyncDeathcryCapEdge();
+
             // C1：表层免费（改表）+ 扣除层由补丁自己看配置
             bool enh = _freeEnhance != null && _freeEnhance.Value;
             if (enh)
@@ -601,11 +624,14 @@ namespace CrystarQoL.Features
 
             // C3-b 净化：无表可改、无重放；抑制窗口由 CreationWrapperPatch 自己看配置。
             //   修正九（r10）/ 修正十（r11）：**幽怨槽池**（观测 + 可选扩容）。
-            //   槽池由 ItemManager.Reset/Initialize 建，所以这里按 2s 重放兜"场景切换 / 开关跳变"。
-            //   ⚠ 修正十起：扩容默认关（`DeathcryPoolExpand`），FIFO 顶替默认开（`DeathcryFifo`），
-            //     但**观测（打一遍槽池现状）任何时候都值得跑一次**，所以三个开关有一个亮就跑。
-            //   ⚠ 修正十五：这里跟的是**净化**开关（`FreeCreation`），不是思装变容。
-            if (PurifyFreeOn() || FifoOn() || ExpandOn())
+            //   ⛔⛔ r27-fix4（铁律 10.63）：这里**不再**是数量同步的主触发点 ——
+            //     cap 变化已由 <see cref="SyncDeathcryCapEdge"/> 在 OnUpdate 最外层即时全同步。
+            //     本段降级为「2s 无条件兜底」：覆盖场景重建、捡/净化幽怨导致持有数漂移、
+            //     以及曾经补过槽但开关全关时把多余空槽撤掉（r14 的 _poolEverGrown 语义）。
+            //     ⚠ 原门控 `if (PurifyFreeOn() || FifoOn() || ExpandOn())` 已移除：
+            //       三个开关可能全关，那时「关掉扩容」若只靠这段就永远不落地。
+            //       无条件跑的代价只是每 2s 一次只读观测 + 幂等同步（total==cap 直接返回），
+            //       EnsureDeathcryPool 内部各分支仍有自己的判据，零副作用。
             {
                 int now = Environment.TickCount;
                 if (now - _lastPoolAt >= ReapplyMs)
@@ -619,6 +645,14 @@ namespace CrystarQoL.Features
 
         public void OnSceneLoaded(int buildIndex, string sceneName)
         {
+            // r27-fix2：HUD 随场景重建 ⇒ 图标布局缓存与复用池必须整体作废，
+            //   否则旧 footer 的图标对象会被复用进新列表、缓存也会错误命中。
+            _iconAppliedCap = -1;
+            _iconAppliedCount = -1;
+            _iconSpare.Clear();
+            _iconActiveFooter = null;
+            _iconRedrawing = false;        // r27-fix3：场景重建时清掉可能残留的重绘标志
+
             // ⛔⛔ 修正十六（r17）：**绝不在这里清备份**。
             //   r16 及以前这里写的是"表可能随场景重载：备份作废不写回（对象可能已销毁）"⇒ 直接 Clear，
             //   这正是玩家报的「关掉还是 0 消耗」的根因：开关 ON 期间只要读过档 / 进过战斗 / 回过标题
@@ -1300,27 +1334,38 @@ namespace CrystarQoL.Features
             {
                 // 修正十五（r16）：净化只看 `FreeCreation`，与思装变容（`FreeGrant`）互不干扰
                 bool on = PurifyFreeOn();
-                // ⛔ v0.2.10-r6：无条件日志（理由同强化包装器）
-                QolLog.Info("growth: 净化窗口开（UI 包装器已触发；净化幽怨无消耗=" + (on ? "ON" : "OFF")
-                            + " / 思装变容无消耗=" + (GrantFreeOn() ? "ON" : "OFF") + "）");
-                if (!on) return;
-                SuppressSubItem = true;
-                _creWin = true;
+                _creFreeOn = on;
+
+                // ⛔⛔ v0.3 修复（2026-11-14）：**观测与抑制必须解耦**。
+                // 旧版把 _creWin / 两套账量测 / 产出计数全放在 `if (!on) return;` 之后，
+                // 于是开关 OFF 的那几次净化一条诊断都不落盘 —— 玩家报「净化产出 0 件」
+                // 时 debug.log 里只有「净化窗口开」，无法判断是 GetHaveItemList(7) 为空、
+                // CheckEnoughItem 失败、还是产出 AddItem 全被背包上限拒了。
+                // ⇒ 无论开关状态，每次 ItemCreation 都重置计数器并量两套账（只读）。
+                _creProbe = true;
+                _creWin = on;                 // 只有真要抑制扣料时才亮（SubItem 归属用）
                 _creSubIdHits = 0;
                 _creSubIdNonZero = 0;
                 _creSubIdSum = 0;
                 _creAddFail = 0;
                 _creAddTotal = 0;
-                // r13：净化前先量两套账（实体 / 登记表），便于解释"UI 显示 10 却产出 11 件"
-                _creHeldBefore = CountDeathcryHeld();
-                _creRegBefore = DeathcryRegistryCount();
+                _creHeldBefore = CountDeathcryHeld();       // 实体口径：mHaveItemList
+                _creRegBefore = DeathcryRegistryCount();    // 登记表口径：硬编码 10 格
+
+                // ⛔ v0.2.10-r6：无条件日志（理由同强化包装器）
+                QolLog.Info("growth: 净化窗口开（UI 包装器已触发；净化幽怨无消耗=" + (on ? "ON" : "OFF")
+                            + " / 思装变容无消耗=" + (GrantFreeOn() ? "ON" : "OFF")
+                            + "；净化前持有 " + _creHeldBefore + " / 登记表 " + _creRegBefore + "）");
+
+                if (!on) return;
+                SuppressSubItem = true;
             }
 
             private static Exception Finalizer(Exception __exception)
             {
-                if (_creWin)
+                if (_creProbe)
                 {
-                    _creWin = false;
+                    _creProbe = false;
                     // 0 次 ⇒ 前置闸（材料不足）在扣料前就 return 了，我们的抑制旗没派上用场。
                     // 修正九（r10）：附上槽池现状 —— 用它实机确认"净化到底吃了几个幽怨 / 槽池有没有补开"。
                     string extra = "";
@@ -1333,12 +1378,15 @@ namespace CrystarQoL.Features
                     // 修正十一：把"产出件数"直接打出来 —— 净化是**一次处理全部持有幽怨**，
                     // 所以件数 = 本次被净化的幽怨数（双跑 ⇒ 记数会翻倍，这里除以 2 报真值）。
                     int made = _creAddTotal / 2;
-                    QolLog.Info("growth: 净化窗口闭 —— 拦下 SubItem(id)×" + _creSubIdHits
+                    QolLog.Info("growth: 净化窗口闭 —— 净化幽怨无消耗=" + (_creFreeOn ? "ON" : "OFF")
+                                + "；拦下 SubItem(id)×" + _creSubIdHits
                                 + "（其中 count>0 的 " + _creSubIdNonZero + " 笔 / Σcount=" + _creSubIdSum + "）"
                                 + "；净化前持有幽怨 " + _creHeldBefore + " 个（登记表记 " + _creRegBefore + " 个）"
+                                + "；净化后持有 " + CountDeathcryHeld() + " 个"
                                 + "；产出 AddItem " + made + " 件（原始计数 " + _creAddTotal + " 已按双跑折半）"
                                 + "；AddItem 失败 " + _creAddFail + " 笔" + extra);
                 }
+                _creWin = false;
                 SuppressSubItem = false;
                 return __exception;
             }
@@ -1450,7 +1498,9 @@ namespace CrystarQoL.Features
         {
             private static void Postfix(ref ItemManager.eError error)
             {
-                if (!_creWin) return;
+                // v0.3 修复：改成观测标记 —— 「净化无消耗=OFF」时同样要统计产出件数与失败笔数，
+                // 否则玩家报「净化不出东西」时这两项永远是 0/0，看不出是哪个环节挂了。
+                if (!_creProbe) return;
                 _creAddTotal++;                                              // 修正十一：到底产了几件
                 if (error != ItemManager.eError.ERROR_NONE) _creAddFail++;
             }
@@ -1499,25 +1549,12 @@ namespace CrystarQoL.Features
             return f != null && f._deathcryFifo != null && f._deathcryFifo.Value;
         }
 
-        /// <summary>`DeathcryPoolExpand` 开关（默认 false）。</summary>
+        /// <summary>`DeathcryPoolExpand` 开关（默认 false）。r27 起也是图标跟随的唯一判据
+        /// —— 图标行为直接由 <see cref="DeathcryCap"/> 决定，不再有第二个开关。</summary>
         private static bool ExpandOn()
         {
             var f = Inst;
             return f != null && f._deathcryPoolExpand != null && f._deathcryPoolExpand.Value;
-        }
-
-        /// <summary>`DeathcryIconExpand` 开关（默认 true）。</summary>
-        private static bool IconExpandOn()
-        {
-            var f = Inst;
-            return f != null && f._deathcryIconExpand != null && f._deathcryIconExpand.Value;
-        }
-
-        /// <summary>`DeathcryCountScale` 开关（默认 false，实验性）。</summary>
-        private static bool CountScaleOn()
-        {
-            var f = Inst;
-            return f != null && f._deathcryCountScale != null && f._deathcryCountScale.Value;
         }
 
         /// <summary>r14：**当前有效幽怨上限**（不是空闲槽数！）。扩容开 = 20，否则原版 10。</summary>
@@ -1671,6 +1708,13 @@ namespace CrystarQoL.Features
                 return;
             }
 
+            // r27-fix：uid=0 是**危险信号** —— ToUInt 在读不到 / 转换失败时静默返回 0（见 ToUInt），
+            //   SubItem(0,1) 返回 ERROR_NONE 也可能只是"没找到"，不等于删成功。
+            //   2026-11-14 02:56:56 起回落日志连续 6 条 uid=0，加一次性诊断供后续分辨真假删除。
+            if (bestUid == 0)
+                WarnOnce("growth.fifo.uid0", "顶替目标 mUniqueID=0（可能是反射读不到）"
+                         + " ⇒ SubItem(0,1) 可能空转；id=" + bestId + " / t=" + bestT);
+
             // 走游戏自己的删除路径（0x3A570，实例方法；SellItem 与 ItemEnhancement 都在调它 ⇒ 运行期可用）
             var ret = im.SubItem(bestUid, 1);
             _fifoEvicts++;
@@ -1817,8 +1861,12 @@ namespace CrystarQoL.Features
 
         /// <summary>
         /// `UserParameter.ClearDeathCryCharaID()`(0x1EBA80，**实例方法** ✅) 的 Prefix：
-        /// 开着「净化无消耗」时**跳过清表**，让登记表与"幽怨还在包里"保持一致。
-        /// 关着开关时完全放行（原版行为：净化完清表、下次重新累积）。
+        /// **只要包里还持有幽怨实体就跳过清表**，让登记表与 UI/门闸保持一致。
+        /// ⛔⛔ v0.3 修复（2026-11-14）：判据由「净化无消耗开关」改为「实体数」——
+        /// 清表是净化演出收尾回调（static 0x173490 @0x1734F4）**无条件**做的，它默认幽怨已被消耗光。
+        /// 只要实体还在（无消耗 / 净化产出 0 件 / 扣料被拦），清表就会造成
+        /// 「槽位显示满 + GetDeathCryCount()==0 ⇒ OnDecision 门闸永久拒绝」的分裂状态。
+        /// 实体真的归零时完全放行（原版行为，零副作用）。
         /// </summary>
         [HarmonyLib.HarmonyPatch(typeof(UserParameter), "ClearDeathCryCharaID", new Type[] { })]
         private static class DeathcryClearGuardPatch
@@ -1827,15 +1875,17 @@ namespace CrystarQoL.Features
             {
                 try
                 {
-                    // 修正十五（r16）：只跟**净化**开关；关着思装变容也照样走原版清表
-                    bool on = PurifyFreeOn();
-                    if (!on) return true;          // 原版行为：该清就清
+                    int held = CountDeathcryHeld();      // 实体口径（mHaveItemList）
+                    if (held == 0) return true;          // 真消耗完了 ⇒ 原版行为：该清就清
+                    // held < 0 = 数不出来（反射失败）⇒ 也拦，宁可保住登记表
 
+                    bool on = PurifyFreeOn();
                     _clearGuardHits++;
                     if (_clearGuardHits <= 2)      // 双跑只打一次，避免刷屏
                     {
-                        QolLog.Info("growth.cre.keep: 拦下 ClearDeathCryCharaID()"
-                                    + " —— 幽怨登记表保持不动（净化幽怨无消耗=ON），下次仍可净化"
+                        QolLog.Info("growth.cre.keep: 拦下 ClearDeathCryCharaID() —— 实体仍持有 "
+                                    + held + " 个幽怨（净化无消耗=" + (on ? "ON" : "OFF")
+                                    + "），登记表保持不动，净化门闸不被锁死"
                                     + "（累计 " + _clearGuardHits + " 次；双跑计 2 属正常）");
                     }
                     Hot.ClearSkip++;
@@ -1851,29 +1901,30 @@ namespace CrystarQoL.Features
         }
 
         // ==================================================================
-        // 修正十三（r14）：`UserParameter.GetDeathCryCount()` 上限缩放（默认**关**，实验性）
+        // 修正十三（r14）历史取证 —— 上限缩放已于 r27 **整体移除**，保留调查结论
         // ------------------------------------------------------------------
-        // 【为什么要它】游戏里所有"满幽怨"判定最终都落到 `GetDeathCryCount()`(0x1EBB00)，
-        //   而它的循环上界是编译期常量 `Global.MAX_HAVE_ITEM_DEATHCRY = 10`（dump 152142，
-        //   代码里内联成 `cmp edx, 0xa`）⇒ **登记表口径恒 ≤ 10**，扩容到 20 后"满"仍发生在 10。
-        //   ⇒ 把返回值按 `ceil(持有数 * 10 / 上限)` 缩放，让"满"发生在**扩容后的上限**。
+        // 【原方案】游戏里所有"满幽怨"判定最终落到 `GetDeathCryCount()`(0x1EBB00)，
+        //   循环上界是编译期常量 `Global.MAX_HAVE_ITEM_DEATHCRY = 10`（dump 152142，
+        //   内联成 `cmp edx, 0xa`）⇒ 登记表口径恒 ≤ 10，扩容到 20 后"满"仍发生在 10。
+        //   原做法：把返回值按 `ceil(持有数 * 10 / 上限)` 缩放，让"满"发生在扩容后的上限。
         //
-        // 【调用者清单（callers 扫描，7 处）】—— 这也是它默认关的原因：
-        //   0xE05D3  UIDeathCryWindow.OpenWindow（x2）  开窗判据 `count > 0` ⇒ 缩放无碍
-        //   0x15EC27 RoomManager.Update                  `count > 0` ⇒ 无碍
-        //   0x1789CC UIRoomReadingMenuWindow.OnDecision  净化门闸 `count > 0` ⇒ 无碍
-        //   0x1B6E19 BattleManager.AddItem（static）     入包路径
+        // 【⛔ r27 为什么删】调用者清单（callers 扫描，7 处）里
         //   0x1D0D1E / 0x1D139C  TaskComponent.Initialize / Run   ⚠ **任务/成就判定会被缩放**
-        //   ⇒ 副作用主要在这里，所以默认关；玩家手动打开后由自己承担。
+        //   配合 10.32：`TrophyManager.CheckCount` 的 `before < 0` 分支要求
+        //   `after == mCount` **严格相等** ⇒ 缩放值会跳过命中点，奖杯 #43「界限状况」
+        //   可能永久解不开。收益只有「满发生在 20」，代价是赌奖杯 ⇒ 不划算。
+        //   其余调用者 0xE05D3 / 0x15EC27 / 0x1789CC / 0x1B6E19 判据都是 `count > 0`。
         //
-        // 【幂等】纯计算 + 只依赖 `CountDeathcryHeld()`（不调 GetDeathCryCount ⇒ 无递归）；
-        //   双跑两次结果一致（铁律 1）。
+        // 【现状】本挂点只保留「登记表 0 / 实体 > 0」的自愈兜底（10.58），
+        //   正常态对返回值零改动；自愈值仍压在 10 以内，不碰奖杯满值语义。
         // ==================================================================
 
         /// <summary>
         /// `UserParameter.GetDeathCryCount()`(0x1EBB00，**实例方法** ✅) 的 Postfix：
-        /// 按 <see cref="DeathcryCap"/> 缩放返回值，使"满"发生在扩容后的上限而不是 10。
-        /// 上限就是原版 10（未开扩容）时**直接不改**（零副作用）。
+        /// ⚠ r27（2026-11-14）：**只保留两套账自愈**，原「按上限缩放」段已删除。
+        /// 原因见 10.32：`TrophyManager.CheckCount` 的 `before &lt; 0` 分支要求
+        /// `after == mCount` **严格相等**，缩放后的值会跳过命中点 ⇒ 奖杯 #43「界限状况」
+        /// 可能永久解不开。正常情况下本补丁对返回值零改动。
         /// </summary>
         [HarmonyLib.HarmonyPatch(typeof(UserParameter), "GetDeathCryCount", new Type[] { })]
         private static class DeathcryCountScalePatch
@@ -1883,17 +1934,26 @@ namespace CrystarQoL.Features
                 Hot.GetDc++;
                 try
                 {
-                    if (!CountScaleOn()) return;
-                    int cap = DeathcryCap();
-                    if (cap <= DeathcryPoolNative) return;      // 上限 = 10 ⇒ 原值就是对的
+                    // ⛔⛔ v0.3 修复（2026-11-14）：**两套账自愈**。
+                    // 净化门闸 UIRoomReadingMenuWindow.OnDecision(0x178850 @0x1789CC) 读的是
+                    // 登记表（mDeathCryCharaID 硬编码 10 格）。清表回调跑过之后它变 0，
+                    // 而扩容到 20 的实体幽怨可能仍在包里 ⇒ 「槽位显示满却提示没有幽怨」，
+                    // 且「净化无消耗=ON」也救不回来（它得先过这道门闸）。
+                    // ⇒ 登记表报 0 而实体 > 0 时补一个 >0 的值（仍压在 10 以内，
+                    //   不改变奖杯 #43 的满值语义）。只在异常态才遍历 mHaveItemList，正常态零开销。
+                    if (__result <= 0)
+                    {
+                        int held = CountDeathcryHeld();
+                        if (held <= 0) return;                  // 真的没有幽怨 ⇒ 保持 0
+                        int fixedCount = held > DeathcryPoolNative ? DeathcryPoolNative : held;
+                        WarnOnce("growth.cre.regfix", "登记表=0 但实体=" + held
+                                 + " 个 ⇒ 门闸按 " + fixedCount + " 放行（两套账自愈）");
+                        __result = fixedCount;
+                        return;
+                    }
 
-                    int held = CountDeathcryHeld();
-                    if (held < 0) return;                       // 数不出来 ⇒ 用原值
-
-                    int scaled = (held * DeathcryPoolNative + cap - 1) / cap;   // ceil
-                    if (scaled > DeathcryPoolNative) scaled = DeathcryPoolNative;
-                    if (scaled < 0) scaled = 0;
-                    __result = scaled;
+                    // r27：登记表正常（> 0）⇒ 原值直接放行，不再做上限缩放。
+                    //      缩放段已随 DeathcryCountScale 开关整体移除（见类注释 / 10.32）。
                 }
                 catch (Exception e)
                 {
@@ -1903,7 +1963,8 @@ namespace CrystarQoL.Features
         }
 
         // ==================================================================
-        // 修正十三（r14）：幽怨 **图标数量** 跟随上限（默认开）
+        // 修正十三（r14）：幽怨 **图标数量** 跟随上限
+        // ⚠ r27：不再有独立开关，无条件跟随 DeathcryCap()（主开关开⇒20 / 关⇒还原 10）
         // ------------------------------------------------------------------
         // 【取证】`UIFooterContent.UpdateDeathCryCount()`(0xEE0A0，private 实例方法 ✅)：
         //     r12 = ItemManager.Instance.GetHaveItemList(7)      @0xEE104 `lea edx,[r8+7]`
@@ -1924,7 +1985,8 @@ namespace CrystarQoL.Features
 
         /// <summary>
         /// `UIFooterContent.UpdateDeathCryCount()`(0xEE0A0，private 实例方法 ✅) 的 Prefix：
-        /// 图标不够上限个数时，Instantiate 补出来（默认开 `DeathcryIconExpand`）。
+        /// r27：图标数量**无条件**跟随 <see cref="DeathcryCap"/>（扩容开就补到 20，
+        /// 关就还原原版 10 颗布局），不再受独立开关控制。
         /// </summary>
         [HarmonyLib.HarmonyPatch(typeof(UIFooterContent), "UpdateDeathCryCount", new Type[] { })]
         private static class DeathcryIconExpandPatch
@@ -1932,6 +1994,10 @@ namespace CrystarQoL.Features
             private static void Prefix(UIFooterContent __instance)
             {
                 Hot.FooterIcon++;
+                if (__instance != null) _iconActiveFooter = __instance;   // r27-fix：留住最新 HUD 实例
+                // r27-fix3：这是我们反射请求重绘触发的那一次 ⇒ 只记实例，不再调整布局。
+                // 原方法体照常执行（Prefix 的 return 不影响），由游戏自己按新列表设亮/暗。
+                if (_iconRedrawing) return;
                 try { EnsureDeathcryIcons(__instance); }
                 catch (Exception e)
                 {
@@ -1941,151 +2007,317 @@ namespace CrystarQoL.Features
         }
 
         /// <summary>
-        /// r14：把 `UIFooterContent.mDeathCryIconList`(0xA0) 补足到 <see cref="DeathcryCap"/> 个。
-        /// 上限 = 原版 10 时**什么都不做**（prefab 原生 10 个图标刚好够）。
-        /// ⚠ 全部反射（铁律 16）；任何一步失败都只留一次性日志，绝不抛给游戏。
+        /// r27-fix / fix3：图标布局的**唯一入口** —— 按当前 <see cref="DeathcryCap"/> 把
+        /// `UIFooterContent.mDeathCryIconList`(0xA0) 幂等地调整到 cap 颗并重排。
+        ///
+        /// ⚠ 职责边界（铁律 10.62，回到 f5e8cd9 基线）：mod **只管列表长度与位置/缩放**。
+        ///   亮/暗/图案/空槽全部由游戏 `UpdateDeathCryCount` 管，绝不 `SetActive`
+        ///   （唯一的 `SetActive` 用在「已从列表移除的孤儿」和「复用池恢复可见」）。
+        ///
+        /// 2026-11-14 三轮实机的教训：
+        ///   · 02:50:44 旧 `RestoreIconLayout` 只改位置/缩放、不裁列表 ⇒ 关扩容后仍是 20 格；
+        ///     且只挂 Prefix ⇒ 游戏不重绘 HUD 时还原根本不跑（02:56:36 后全场零条 growth.icon）。
+        ///   · 03:16 补足图标强行 `SetActive(true)` ⇒ 20 格全红。
+        ///   · 11:40 改成一律 `SetActive(false)` + 按持有数同步 ⇒ 20 格视图只剩 10 个格子。
+        /// 现在：① 布局按 cap 幂等重排（开 / 关 / 再开走同一条路）；
+        ///       ② cap=10 时把多出的图标隐藏并就地 RemoveAt 截回 10（铁律 15，孤儿隐藏合理）；
+        ///       ③ <see cref="SyncDeathcryCapEdge"/> 在 OnUpdate 主动触发补/裁，并请求游戏重绘一次，
+        ///          不依赖 HUD 是否自己重绘；
+        ///       ④ 持有数变化时游戏自己重绘（Prefix 命中缓存 return，原方法体照常设亮暗）。
+        /// ⚠ 全部反射（铁律 16）；任何一步失败只留一次性 Warn，绝不抛给游戏。
         /// </summary>
         private static void EnsureDeathcryIcons(object footer)
         {
-            if (footer == null || _iconExpandTried) return;
-            if (!IconExpandOn()) return;
-
-            int cap = DeathcryCap();
-            if (cap <= DeathcryPoolNative)
-            {
-                // r15：关掉扩容 ⇒ 把图标布局**还原**成原版 10 颗的样子
-                //（否则 10 颗会一直挤在缩小的宽度里，右半边空一片）。
-                RestoreIconLayout(footer);
-                return;
-            }
-
-            if (ReferenceEquals(_iconExpandedFooter, footer)) return;   // r15：这个实例补过了
-
-            object list = GetMember(footer, "mDeathCryIconList");   // 0xA0 List<UIDeathCryIconContent>
-            if (list == null)
-            {
-                WarnOnce("growth.icon.list", "取不到 mDeathCryIconList");
-                _iconExpandTried = true; return;
-            }
-            int n = CountOf(list);
-            if (n <= 0) return;                                 // 还没初始化，下次再说
-            if (n >= cap) { _iconExpandedFooter = footer; return; }   // 已经够
-
-            object tmpl = ItemOf(list, 0);
-            object root = GetMember(footer, "mDeathCryIconRoot");   // 0xA8 GameObject（父节点）
-            if (tmpl == null)
-            {
-                WarnOnce("growth.icon.tmpl", "mDeathCryIconList[0] 取不到，无法作为模板");
-                _iconExpandTried = true; return;
-            }
-
-            var add = list.GetType().GetMethod("Add", new Type[] { SlotElemType(list) });
-            if (add == null) add = list.GetType().GetMethod("Add");
-            if (add == null)
-            {
-                WarnOnce("growth.icon.add", "图标列表无 Add（" + TypeNameOf(list) + "）");
-                _iconExpandTried = true; return;
-            }
-
-            // ── r15：记录 / 取回**布局基准**（原版 n 颗的首位置、等距步长、缩放）──
-            //    ⚠ 只在第一次记录 ⇒ 反复进入也不会越缩越小（幂等）。
-            if (!_iconBaseReady)
-            {
-                UnityEngine.Vector3 first, last;
-                if (TryIconPos(ItemOf(list, 0), out first)
-                    && n >= 2
-                    && TryIconPos(ItemOf(list, n - 1), out last))
-                {
-                    _iconBaseFirst = first;
-                    _iconBaseStep = (last - first) / (n - 1);   // 均匀排列 ⇒ 平均间距
-                    if (!TryIconScale(ItemOf(list, 0), out _iconBaseScale))
-                        _iconBaseScale = new UnityEngine.Vector3(1f, 1f, 1f);
-                    _iconBaseReady = true;
-                    QolLog.Info("growth.icon: 布局基准 = 首颗 " + FmtVec(_iconBaseFirst)
-                                + " / 间距 " + FmtVec(_iconBaseStep)
-                                + " / 缩放 " + FmtVec(_iconBaseScale));
-                }
-                else
-                {
-                    WarnOnce("growth.icon.pos",
-                        "取不到旧图标的 localPosition/localScale ⇒ 无法算出摆放位置（补位会让图标叠在第 1 颗上）");
-                    _iconExpandTried = true;                    // 本机拿不到基准 ⇒ 别反复试
-                    return;
-                }
-            }
-
-            // 目标：cap 颗**塞进原来 n 颗占的宽度** ⇒ 间距与图标一起等比缩小。
-            // （容器是固定宽度的圆角框，不缩放就会溢出框外被裁掉。）
-            float ratio = (float)(n - 1) / (cap - 1);
-            if (ratio <= 0f || ratio > 1f) ratio = 1f;
-            UnityEngine.Vector3 newStep = _iconBaseStep * ratio;
-            UnityEngine.Vector3 newScale = _iconBaseScale * ratio;
-
-            // ① 把**原有** n 颗重排 + 缩放（位置/缩放都是绝对值 ⇒ 幂等）
-            for (int i = 0; i < n; i++)
-            {
-                object ic = ItemOf(list, i);
-                SetIconPos(ic, _iconBaseFirst + newStep * i);
-                SetIconScale(ic, newScale);
-            }
-
-            // ② 克隆补足到 cap 颗，逐个摆到 i = n .. cap-1
-            int need = cap - n;
-            int made = 0;
-            for (int i = 0; i < need; i++)
-            {
-                object clone = CloneIcon(tmpl, root);
-                if (clone == null) break;                       // 失败 ⇒ 停下（不刷屏）
-                SetIconPos(clone, _iconBaseFirst + newStep * (n + i));
-                SetIconScale(clone, newScale);
-                try { add.Invoke(list, new object[] { clone }); made++; }
-                catch (Exception e)
-                {
-                    WarnOnce("growth.icon.invoke", "List.Add 克隆图标失败 -> " + e.GetType().Name + ": " + e.Message);
-                    break;
-                }
-            }
-
-            _iconExpandNote = "幽怨图标 " + n + " -> " + CountOf(list) + "（目标 " + cap + "，本次补 " + made
-                              + "，缩放 " + ratio.ToString("0.###") + "，间距 " + FmtVec(newStep) + "）";
-            if (made > 0 || !_iconExpandTried)
-            {
-                QolLog.Info("growth.icon: " + _iconExpandNote
-                            + (made < need ? " ⚠ 未补满，见 growth.icon.* 的一次性 Warn" : ""));
-            }
-            if (made > 0) _iconExpandedFooter = footer;         // 同一实例只补一次
-            if (made <= 0) _iconExpandTried = true;             // 一个都造不出来 ⇒ 别再试
+            if (footer == null) return;
+            ApplyIconLayout(footer, DeathcryCap());
         }
 
         /// <summary>
-        /// r15：关掉扩容时把图标布局还原成原版（位置 / 缩放都回到 <c>_iconBase*</c>）。
-        /// ⚠ 只在**这个实例确实被我们扩过容**时执行一次，之后 <c>_iconExpandedFooter</c> 置空 ⇒ 不会每帧重跑。
+        /// r27-fix4（铁律 10.63）：cap 的 20↔10 边沿**一次性全同步**。挂在 `OnUpdate` 最外层
+        /// （**不受** `PurifyFreeOn() || FifoOn() || ExpandOn()` 那个 2s 重放条件限制）。
+        ///
+        /// ⛔⛔ 2026-11-14 12:44 实机排查：玩家反馈「左右键切换扩容图标会变、但幽怨数量不应用；
+        ///   确认键才会变数量」。真相**不是按键路径差异**（两条路径都写同一个
+        ///   `DeathcryPoolExpand.Value`，`QolConfig.Save()` 也无变更回调），而是两套同步节奏不对等：
+        ///   · 图标：本函数每帧检测 cap 边沿 ⇒ 按键后 3~7ms 立即变；
+        ///   · 数量：`EnsureDeathcryPool("OnUpdate")` 只在 2s 节流 tick 跑 ⇒ 关扩容后
+        ///     如果 cap=10 的窗口没跨过任何 tick（左右键快速 OFF→ON，日志 0.48~0.88s），
+        ///     `ShrinkDeathcryOverflow` 判据 `held(12) &gt; cap` 从没被求值 ⇒ 12 个幽怨永久保留；
+        ///     确认键那次恰好卡在 tick 前 45ms ⇒ 命中，裁到 10。**纯相位巧合**。
+        ///   ⇒ 根因是「数量同步挂在周期轮询上、没跟 cap 边沿绑定」，不是按键类型。
+        ///
+        /// 现在：cap 变化的那一帧同时做 ① 槽池补/撤 + 溢出一次删完（数量，不依赖 HUD 实例）、
+        /// ② 图标列表长度/位置/缩放 + 请求游戏重绘（HUD，依赖 footer）。两者同一帧落地，
+        /// 与按键类型、操作节奏、2s tick 相位全部解耦。
         /// </summary>
-        private static void RestoreIconLayout(object footer)
+        private static void SyncDeathcryCapEdge()
         {
-            if (!_iconBaseReady) return;
-            if (!ReferenceEquals(_iconExpandedFooter, footer)) return;   // 没扩过 ⇒ 本来就不用还
+            int cap = DeathcryCap();
+            if (cap == _iconLastCap) return;
+            int prev = _iconLastCap;
+            _iconLastCap = cap;
+            if (prev < 0) return;                       // 首帧只记基线，不做动作
+
+            // ① 数量：cap 边沿一次性收敛到新上限，**不依赖 HUD / footer**（营地菜单里也有 ItemManager）。
+            //    复用 EnsureDeathcryPool 的既有判据（撤/补空槽 + FifoOn 才裁减），
+            //    只把 maxEvict 放到 int.MaxValue ⇒ 溢出的幽怨一次删完，不等后续 2s tick。
+            try { EnsureDeathcryPool("CapEdge", int.MaxValue); }
+            catch (Exception e)
+            {
+                WarnOnce("growth.capedge.pool", "cap 边沿池同步失败 -> " + e.GetType().Name + ": " + e.Message);
+            }
+
+            // ② 图标：依赖 Prefix 见过的 HUD 实例；没见过就等下一次 Prefix，
+            //    数量已经在上面落地，不会因此丢失。
+            object footer = _iconActiveFooter;
+            if (footer == null) return;
             try
             {
-                object list = GetMember(footer, "mDeathCryIconList");
-                if (list != null)
+                QolLog.Info("growth.icon.edge: 上限 " + prev + " -> " + cap
+                            + " ⇒ 数量与图标同帧同步并主动请求游戏重绘");
+                EnsureDeathcryIcons(footer);             // 只管列表长度 + 位置/缩放
+                RequestIconRedraw(footer);               // 亮/暗/图案/空槽交还游戏
+            }
+            catch (Exception e)
+            {
+                WarnOnce("growth.icon.edgeex", "cap 边沿同步失败 -> " + e.GetType().Name + ": " + e.Message);
+            }
+        }
+
+        private static void ApplyIconLayout(object footer, int cap)
+        {
+            // ⛔ r27-fix2：`ReferenceEquals(footer, ...)` 对 IL2CPP 代理**不可靠** ——
+            //   Harmony 每次 Prefix 传入的可能是同一 native 对象的新托管包装 ⇒ 恒 false，
+            //   导致缓存从不命中（03:16 日志连打 4 条「10 -> 10」）、复用池被反复清空。
+            //   改用稳定的 (cap, 列表长度) 做键；场景切换由 `OnSceneLoaded` 显式重置缓存与复用池。
+            object list = GetMember(footer, "mDeathCryIconList");
+            if (list == null)
+            {
+                WarnOnce("growth.icon.list", "取不到 mDeathCryIconList");
+                return;
+            }
+            int n = CountOf(list);
+            if (n <= 0) return;                          // 还没初始化（场景重建会再来）
+
+            // 幂等缓存：目标上限与实际列表长度都没变 ⇒ 零开销直接返回
+            if (cap == _iconAppliedCap && n == _iconAppliedCount) return;
+
+            // ── 布局基准：只在列表仍是原版 10 颗时记录（补过之后的位置是缩过的，不能当基准）──
+            if (!_iconBaseReady)
+            {
+                if (n == DeathcryPoolNative)
                 {
-                    int n = CountOf(list);
-                    for (int i = 0; i < n; i++)
+                    UnityEngine.Vector3 first, last;
+                    if (TryIconPos(ItemOf(list, 0), out first)
+                        && TryIconPos(ItemOf(list, n - 1), out last))
+                    {
+                        _iconBaseFirst = first;
+                        _iconBaseStep = (last - first) / (n - 1);
+                        if (!TryIconScale(ItemOf(list, 0), out _iconBaseScale))
+                            _iconBaseScale = new UnityEngine.Vector3(1f, 1f, 1f);
+                        _iconBaseReady = true;
+                        QolLog.Info("growth.icon: 布局基准 = 首颗 " + FmtVec(_iconBaseFirst)
+                                    + " / 间距 " + FmtVec(_iconBaseStep)
+                                    + " / 缩放 " + FmtVec(_iconBaseScale));
+                    }
+                }
+                else
+                {
+                    WarnOnce("growth.icon.base", "首次见到图标列表就是 " + n
+                             + " 颗 ⇒ 取不到原版布局基准，本轮只调数量不改位置");
+                }
+            }
+
+            if (cap <= DeathcryPoolNative)
+            {
+                // ── 关扩容：把列表真正截回 10 颗，多余图标隐藏并缓存复用 ──
+                int removed = TruncateIconList(list, DeathcryPoolNative);
+                if (_iconBaseReady)
+                {
+                    int keep = CountOf(list);
+                    for (int i = 0; i < keep; i++)
                     {
                         object ic = ItemOf(list, i);
                         SetIconPos(ic, _iconBaseFirst + _iconBaseStep * i);
                         SetIconScale(ic, _iconBaseScale);
                     }
-                    QolLog.Info("growth.icon: 扩容已关闭 ⇒ 图标布局还原成原版 " + _iconBaseScale.x.ToString("0.###")
-                                + " 倍（列表仍保留 " + n + " 个，多出的会按游戏逻辑显示为空槽）");
                 }
+                // 开局本来就是 10 颗时别打「扩容已关闭」误导玩家（03:16 刷屏的一半来自这里）
+                if (removed > 0 || n != DeathcryPoolNative)
+                    QolLog.Info("growth.icon: 扩容已关闭 ⇒ 图标列表 " + n + " -> " + CountOf(list)
+                                + "（隐藏并移除 " + removed + " 颗），布局还原为原版 10 颗");
+            }
+            else
+            {
+                // ── 开扩容：补足到 cap 颗（优先复用上次裁掉的图标）──
+                int before = n;
+                int made = 0;
+                if (n < cap)
+                {
+                    object tmpl = ItemOf(list, 0);
+                    object root = GetMember(footer, "mDeathCryIconRoot");
+                    var add = list.GetType().GetMethod("Add", new Type[] { SlotElemType(list) });
+                    if (add == null) add = list.GetType().GetMethod("Add");
+                    if (tmpl == null || add == null)
+                    {
+                        WarnOnce("growth.icon.add", "模板或 List.Add 取不到（" + TypeNameOf(list) + "）");
+                        _iconExpandTried = true;
+                    }
+                    else if (!_iconExpandTried || _iconSpare.Count > 0)
+                    {
+                        int need = cap - n;
+                        for (int i = 0; i < need; i++)
+                        {
+                            object clone = null;
+                            bool reused = false;
+                            if (_iconSpare.Count > 0)
+                            {
+                                object spare = _iconSpare[_iconSpare.Count - 1];
+                                _iconSpare.RemoveAt(_iconSpare.Count - 1);
+                                // 旧场景对象已销毁时 IconTransform 取不到 ⇒ 丢弃，不进新列表
+                                if (IconTransform(spare) != null) { clone = spare; reused = true; }
+                            }
+                            if (clone == null) clone = CloneIcon(tmpl, root);
+                            if (clone == null) break;
+                            // ⛔ 铁律 10.62：**列表内槽位绝不碰 GameObject.SetActive**。
+                            //   空槽 = 「框还在、图案被游戏播净化动画抹掉」，不是隐藏整个 GameObject。
+                            //   克隆体继承模板 active（f5e8cd9 基线行为），亮/暗交给游戏
+                            //   UpdateDeathCryCount —— 补/裁后由 SyncDeathcryCapEdge 主动请求一次重绘。
+                            //   唯一例外：复用池对象裁掉时被隐藏过，取回须恢复可见 ——
+                            //   这是「孤儿 → 槽位」的身份切换，不是亮/暗控制。
+                            if (reused) SetIconActive(clone, true);
+                            try { add.Invoke(list, new object[] { clone }); made++; }
+                            catch (Exception e)
+                            {
+                                WarnOnce("growth.icon.invoke", "List.Add 图标失败 -> "
+                                         + e.GetType().Name + ": " + e.Message);
+                                break;
+                            }
+                        }
+                        if (made <= 0 && _iconSpare.Count == 0) _iconExpandTried = true;
+                    }
+                }
+
+                // 重排（幂等）：无论有没有补，都按当前 cap 重算位置/缩放
+                // ⇒ 修掉旧版「关了再开，n>=cap 直接 return ⇒ 20 颗仍按原版 32px 间距溢出」。
+                if (_iconBaseReady)
+                {
+                    float r = (float)(DeathcryPoolNative - 1) / (cap - 1);
+                    if (r <= 0f || r > 1f) r = 1f;
+                    UnityEngine.Vector3 st = _iconBaseStep * r;
+                    UnityEngine.Vector3 sc = _iconBaseScale * r;
+                    int total = CountOf(list);
+                    for (int i = 0; i < total; i++)
+                    {
+                        object ic = ItemOf(list, i);
+                        SetIconPos(ic, _iconBaseFirst + st * i);
+                        SetIconScale(ic, sc);
+                    }
+                }
+                _iconExpandNote = "幽怨图标 " + before + " -> " + CountOf(list)
+                                  + "（目标 " + cap + "，本次补 " + made + "）";
+                QolLog.Info("growth.icon: " + _iconExpandNote);
+            }
+
+            // ⛔⛔ 铁律 10.62：**这里绝不按持有数 SetActive**（r27-fix3 删除）。
+            //   f5e8cd9 基线（玩家实测「三开关一起开没问题」）从头到尾没有一次 SetActive：
+            //   补图标挂在 `UpdateDeathCryCount` 的 Prefix，补完游戏原方法体**同一帧**就按
+            //   `i < 持有数` 设 sprite、其余播净化动画 ⇒ 亮/暗天然正确。
+            //   r27 把补/裁搬到 OnUpdate 的 cap 边沿后脱离了这次刷新，于是我先后用
+            //   SetActive(true)（⇒ 满红）、SetActive(false)（⇒ 只剩 10 格）去补，越补越坏。
+            //   现在：列表长度/位置/缩放归 mod，亮/暗归游戏 —— 由调用方
+            //   <see cref="SyncDeathcryCapEdge"/> 在补/裁后主动请求一次重绘（<see cref="RequestIconRedraw"/>）。
+            //   持有数变化时游戏自己会重绘（Prefix 命中缓存直接 return，原方法体照常跑），无需 mod 插手。
+            _iconAppliedCap = cap;
+            _iconAppliedCount = CountOf(list);
+        }
+
+        /// <summary>
+        /// r27-fix3（铁律 10.62）：补/裁完列表后，主动请游戏跑一次
+        /// `UIFooterContent.UpdateDeathCryCount()`(0xEE0A0，private 实例方法)，
+        /// 由它自己按 `i &lt; 持有数` SetActive(true)+设 sprite、其余播净化动画。
+        ///
+        /// 【为什么必须】开关扩容在营地菜单完成，游戏此刻**不会**重绘 HUD
+        ///   （2026-11-14 02:56:36 实机：关扩容后全场零条 growth.icon）。
+        ///   基线靠 Prefix 紧跟原方法体；搬到 OnUpdate 边沿后必须自己补这次刷新，
+        ///   否则新克隆的图标停在「继承模板的亮红 sprite」状态（满红）或旧状态。
+        /// 【取证】0xEDF90 UpdateCountInfo @0xEDFFD 直接 `call 0xEE0A0`；
+        ///   反射调 private 实例方法的写法沿用本文件 DeathcryRegistryCount（实机可用）。
+        /// 【防递归】调用会触发本类 Prefix ⇒ `_iconRedrawing` 置位期间 Prefix 直接 return，
+        ///   不会再进 ApplyIconLayout；且 (cap, 列表长度) 幂等缓存也会命中。
+        /// 【降级】取不到方法 / 反射抛异常只留一次性 Warn；此时列表长度与布局仍正确，
+        ///   亮暗等下一次 HUD 自然重绘，绝不抛给游戏。
+        /// </summary>
+        private static void RequestIconRedraw(object footer)
+        {
+            if (footer == null || _iconRedrawing) return;
+            try
+            {
+                _iconRedrawing = true;
+                // 主路径：精准只刷幽怨图标（0xEE0A0 一定跑，无 UpdateCountInfo 的条件分支）。
+                var mi = footer.GetType().GetMethod("UpdateDeathCryCount",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
+                    null, Type.EmptyTypes, null);
+                if (mi != null) { mi.Invoke(footer, null); return; }
+
+                // 退化路径：编译期可见的 `UpdateCountInfo()`(0xEDF90，@0xEDFFD 会 call
+                // 0xEE0A0)。FeatureEconomy.RefreshHud 已在实机直接调过它，零反射风险。
+                var f = footer as UIFooterContent;
+                if (f != null) { f.UpdateCountInfo(); return; }
+
+                WarnOnce("growth.icon.redraw.mi",
+                    "取不到 UpdateDeathCryCount / UpdateCountInfo ⇒ 亮暗交给下一次 HUD 重绘");
             }
             catch (Exception e)
             {
-                WarnOnce("growth.icon.restore", "还原图标布局失败 -> " + e.GetType().Name + ": " + e.Message);
+                WarnOnce("growth.icon.redraw.ex",
+                    "请求游戏重绘幽怨图标失败 -> " + e.GetType().Name + ": " + e.Message);
             }
-            _iconExpandedFooter = null;
+            finally { _iconRedrawing = false; }
+        }
+
+        /// <summary>r27-fix：把图标列表就地裁到 keep 颗；被裁的先 SetActive(false) 再缓存复用。</summary>
+        private static int TruncateIconList(object list, int keep)
+        {
+            int n = CountOf(list);
+            if (n <= keep) return 0;
+            var removeAt = list.GetType().GetMethod("RemoveAt", new Type[] { typeof(int) });
+            if (removeAt == null)
+                WarnOnce("growth.icon.remove", "图标列表无 RemoveAt（" + TypeNameOf(list)
+                         + "）⇒ 多余图标只能靠 SetActive 隐藏");
+            int done = 0;
+            for (int i = n - 1; i >= keep; i--)
+            {
+                object ic = ItemOf(list, i);
+                SetIconActive(ic, false);
+                if (removeAt == null) continue;                 // 没移出列表的对象不能进复用池
+                try
+                {
+                    removeAt.Invoke(list, new object[] { i });
+                    _iconSpare.Add(ic);
+                    done++;
+                }
+                catch (Exception e)
+                {
+                    WarnOnce("growth.icon.removeex", "RemoveAt 失败 -> " + e.GetType().Name + ": " + e.Message);
+                    break;
+                }
+            }
+            return done;
+        }
+
+        /// <summary>r27-fix：借已实机验证的 `IconTransform`（编译期可见的 UnityEngine.Transform）切激活态。</summary>
+        private static void SetIconActive(object icon, bool on)
+        {
+            try
+            {
+                var t = IconTransform(icon);
+                if (t != null) t.gameObject.SetActive(on);      // SetActive 本身幂等
+            }
+            catch (Exception e)
+            {
+                WarnOnce("growth.icon.active", "SetActive 失败 -> " + e.GetType().Name + ": " + e.Message);
+            }
         }
 
         /// <summary>r15：诊断用的向量格式化（日志里看得懂就够）。</summary>
@@ -2278,8 +2510,10 @@ namespace CrystarQoL.Features
         }
 
         /// <summary>统一入口：**先观测**（本会话第一次打一遍 8 个槽池的空闲数 + freeItemCounts 原值），
-        /// 再按开关决定是否补槽（关着 ⇒ 保持原版 10 格，绝不擅自改原版行为）。</summary>
-        private static void EnsureDeathcryPool(string src)
+        /// 再按开关决定是否补槽（关着 ⇒ 保持原版 10 格，绝不擅自改原版行为）。
+        /// <paramref name="maxEvict"/>：溢出裁减本轮最多删几个；默认 4（2s 兜底逐轮收敛，不卡帧），
+        /// cap 边沿传 <c>int.MaxValue</c> ⇒ 一次删完，保证「关扩容」即时落到上限（铁律 10.63）。</summary>
+        private static void EnsureDeathcryPool(string src, int maxEvict = 4)
         {
             try
             {
@@ -2307,7 +2541,8 @@ namespace CrystarQoL.Features
 
                 // r14：持有数超过上限（典型＝刚从 20 关回 10）⇒ 逐轮顶掉超出的，让上限真正生效。
                 // 只在 FIFO 开着时做（关掉 FIFO = 玩家明确接受"原版行为"）。
-                if (FifoOn()) ShrinkDeathcryOverflow(im, src);
+                // r27-fix4：maxEvict 由调用方给 —— cap 边沿一次删完，2s 兜底每轮最多 4 个。
+                if (FifoOn()) ShrinkDeathcryOverflow(im, src, maxEvict);
             }
             catch (Exception e)
             {
@@ -2432,16 +2667,18 @@ namespace CrystarQoL.Features
         /// r14：持有幽怨数**超过**当前上限时，逐轮顶掉超出的（配合 <see cref="SyncDeathcryPool"/> 的收缩）。
         /// 典型场景：玩家从「扩容 20」关回「上限 10」后，手上还压着 18 个 ⇒ 这里把它降回 10，
         /// 否则"关掉扩容"看起来毫无效果（用户 2026-09-14 复现：关掉扩容后依旧产出 18 件）。
-        /// ⚠ 每轮最多删 4 个（2s 一次重放），既不卡帧也便于在日志里观察过程。
+        /// ⚠ 默认每轮最多删 4 个（2s 一次重放的兜底路径），既不卡帧也便于在日志里观察过程；
+        ///   cap 边沿（<see cref="SyncDeathcryCapEdge"/>）传 <c>int.MaxValue</c> ⇒ 一次删完，
+        ///   保证「关扩容」在按键下一帧就真正落到上限，不再看 2s tick 相位（铁律 10.63）。
         /// </summary>
-        private static void ShrinkDeathcryOverflow(ItemManager im, string src)
+        private static void ShrinkDeathcryOverflow(ItemManager im, string src, int maxEvict = 4)
         {
             int cap = DeathcryCap();
             int held = CountDeathcryHeld();
             if (held < 0 || held <= cap) return;
 
             int over = held - cap;
-            if (over > 4) over = 4;
+            if (over > maxEvict) over = maxEvict;
             for (int i = 0; i < over; i++) EvictOldestDeathcry(im, 0);
 
             QolLog.Info("growth.pool: 幽怨持有 " + held + " 个 > 上限 " + cap
@@ -2632,15 +2869,12 @@ namespace CrystarQoL.Features
                 RiskTier.Safe, Effect.Immediate);
             // ── 修正十（r11）：幽怨满了怎么办 ──
             //   FIFO 顶替（默认开）：满时自动顶掉最早获取的那个 ⇒ 新幽怨永远拿得到。
-            //   槽池扩容（默认关）：把 10 补到 20；⚠ UI/登记表硬编码 10，扩容后第 11 个起显示不出来。
+            //   槽池扩容（默认关）：把 10 补到 20，图标自动跟随（r27 并入，无独立开关）。
+            //   ⚠ r27：删掉「图标跟随上限」「计数随上限」两行 —— 前者没有独立价值、
+            //     关掉只会造坏状态，后者有 10.32 奖杯风险。F2 与营地页必须一起删（五处齐改）。
             yield return Item.Bool(Loc.T("f.deathcry.fifo"), _deathcryFifo, false,
                 RiskTier.Safe, Effect.Immediate);
             yield return Item.Bool(Loc.T("f.deathcry.expand"), _deathcryPoolExpand, false,
-                RiskTier.Safe, Effect.Immediate);
-            // ── 修正十三（r14）的两个配套开关；修正十四（r15）补进 F2 面板与营地页 ──
-            yield return Item.Bool(Loc.T("f.deathcry.icon"), _deathcryIconExpand, true,
-                RiskTier.Safe, Effect.Immediate);
-            yield return Item.Bool(Loc.T("f.deathcry.scale"), _deathcryCountScale, false,
                 RiskTier.Safe, Effect.Immediate);
         }
     }
