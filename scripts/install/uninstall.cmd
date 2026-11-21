@@ -40,15 +40,15 @@ if /i "%~1"=="/dry" set "DRYRUN=1"
 if /i "%~1"=="-dry" set "DRYRUN=1"
 
 rem  --- locate the game root (works from game root or from Crystar.QoL\) ---
-if not exist "%GAMEDIR%\CRYSTAR.exe" (
-    if exist "%GAMEDIR%\..\CRYSTAR.exe" (
-        for %%I in ("%GAMEDIR%\..") do set "GAMEDIR=%%~fI"
+if not exist "!GAMEDIR!\CRYSTAR.exe" (
+    if exist "!GAMEDIR!\..\CRYSTAR.exe" (
+        for %%I in ("!GAMEDIR!\..") do set "GAMEDIR=%%~fI"
     )
 )
 
-if not exist "%GAMEDIR%\CRYSTAR.exe" (
+if not exist "!GAMEDIR!\CRYSTAR.exe" (
     echo [ERROR] CRYSTAR.exe was not found next to this script.
-    echo         Script location: %SELF%
+    echo         Script location: !SELF!
     echo         Run it from the Crystar install folder, or from the
     echo         Crystar.QoL folder inside it.
     echo.
@@ -66,8 +66,8 @@ if "%DRYRUN%"=="1" echo   Mode        : DRY RUN - nothing will be deleted
 echo.
 
 rem  --- build the validated delete list ---
-if exist "%MANIFEST%" (
-    for /f "usebackq tokens=1,*" %%A in ("%MANIFEST%") do call :validate "%%~A" "%%~B" ""
+if exist "!MANIFEST!" (
+    for /f "usebackq tokens=1,*" %%A in ("!MANIFEST!") do call :validate "%%~A" "%%~B" ""
 ) else (
     echo   [WARN] No manifest found, falling back to the built-in whitelist.
     call :validate "[F]" "version.dll" ""
@@ -145,11 +145,11 @@ rem  it gets the settings copied in here, and it already holds the save
 rem  snapshots the mod took. install.cmd reads it back on the next install.
 set "MODDIR=%GAMEDIR%\UserData\Crystar.QoL"
 set "MODBAK=%MODDIR%\backup"
-if exist "%MODDIR%\" (
-    if not exist "%MODBAK%\" mkdir "%MODBAK%" >nul 2>&1
+if exist "!MODDIR!\" (
+    if not exist "!MODBAK!\" mkdir "!MODBAK!" >nul 2>&1
     for %%M in (settings.cfg gate.pause gate.patch overlay.off map.invert console.show) do (
-        if exist "%MODDIR%\%%M" (
-            copy /y "%MODDIR%\%%M" "%MODBAK%\%%M" >nul 2>&1
+        if exist "!MODDIR!\%%M" (
+            copy /y "!MODDIR!\%%M" "!MODBAK!\%%M" >nul 2>&1
             echo   [ OK ] kept UserData\Crystar.QoL\%%M in backup\
         )
     )
@@ -189,7 +189,7 @@ if "%LEFTOVER%"=="0" (
     echo   [WARN] %LEFTOVER% item^(s^) still present - delete them manually.
 )
 
-if exist "%GAMEDIR%\UserData\Crystar.QoL\backup\" (
+if exist "!GAMEDIR!\UserData\Crystar.QoL\backup\" (
     echo.
     echo   Kept on purpose:
     echo     UserData\Crystar.QoL\backup\   (settings.cfg + save snapshots^)
@@ -260,31 +260,31 @@ if /i "%VNAME%"=="UserData\MelonPreferences.cfg" set "VOK=1"
 if /i "%VNAME%"=="UserData\MelonStartScreen" set "VOK=1"
 if /i "%VNAME%"=="UserData\Crystar.QoL" set "VOK=1"
 if "%VOK%"=="0" (
-    echo   [SKIP] not a whitelisted mod file: %VNAME%
+    echo   [SKIP] not a whitelisted mod file: !VNAME!
     exit /b 0
 )
 
 rem  gate 4 - a directory must not hold game-critical files
-if /i "%VTYPE%"=="[D]" (
-    if not exist "%GAMEDIR%\%VNAME%\" exit /b 0
-    if exist "%GAMEDIR%\%VNAME%\CRYSTAR.exe" (
-        echo   [SKIP] %VNAME% holds CRYSTAR.exe - refusing to touch it.
+if /i "!VTYPE!"=="[D]" (
+    if not exist "!GAMEDIR!\!VNAME!\" exit /b 0
+    if exist "!GAMEDIR!\!VNAME!\CRYSTAR.exe" (
+        echo   [SKIP] !VNAME! holds CRYSTAR.exe - refusing to touch it.
         exit /b 0
     )
-    if exist "%GAMEDIR%\%VNAME%\GameAssembly.dll" (
-        echo   [SKIP] %VNAME% holds GameAssembly.dll - refusing to touch it.
+    if exist "!GAMEDIR!\!VNAME!\GameAssembly.dll" (
+        echo   [SKIP] !VNAME! holds GameAssembly.dll - refusing to touch it.
         exit /b 0
     )
-    if exist "%GAMEDIR%\%VNAME%\UnityPlayer.dll" (
-        echo   [SKIP] %VNAME% holds UnityPlayer.dll - refusing to touch it.
+    if exist "!GAMEDIR!\!VNAME!\UnityPlayer.dll" (
+        echo   [SKIP] !VNAME! holds UnityPlayer.dll - refusing to touch it.
         exit /b 0
     )
-    if exist "%GAMEDIR%\%VNAME%\CRYSTAR_Data" (
-        echo   [SKIP] %VNAME% holds CRYSTAR_Data - refusing to touch it.
+    if exist "!GAMEDIR!\!VNAME!\CRYSTAR_Data" (
+        echo   [SKIP] !VNAME! holds CRYSTAR_Data - refusing to touch it.
         exit /b 0
     )
 ) else (
-    if not exist "%GAMEDIR%\%VNAME%" exit /b 0
+    if not exist "!GAMEDIR!\!VNAME!" exit /b 0
 )
 
 set /a COUNT+=1
@@ -300,17 +300,17 @@ rem  %1 = [F]/[D]   %2 = validated name
 rem  A batch file cannot delete the copy cmd.exe is running right now, so the
 rem  running script is left to the self-delete at the very end.
 if /i "%~2"=="CrystarQoL_uninstall.cmd" (
-    if /i "%SELFPATH%"=="%GAMEDIR%\CrystarQoL_uninstall.cmd" (
+    if /i "!SELFPATH!"=="!GAMEDIR!\CrystarQoL_uninstall.cmd" (
         echo   [ OK ] CrystarQoL_uninstall.cmd - removed when this script exits
         exit /b 0
     )
 )
 if /i "%~1"=="[D]" (
-    rd /s /q "%GAMEDIR%\%~2" 2>nul
+    rd /s /q "!GAMEDIR!\%~2" 2>nul
 ) else (
-    del /f /q "%GAMEDIR%\%~2" 2>nul
+    del /f /q "!GAMEDIR!\%~2" 2>nul
 )
-if exist "%GAMEDIR%\%~2" (
+if exist "!GAMEDIR!\%~2" (
     echo   [FAIL] %~2 - close the game and try again
     set /a FAILED+=1
 ) else (
@@ -324,7 +324,7 @@ rem  ==================================================================
 rem  Mods\ can be shared with other mods: only our dll goes away, and the
 rem  folder follows only when it is REALLY empty.
 del /f /q "%GAMEDIR%\Mods\Crystar.QoL.dll" 2>nul
-if exist "%GAMEDIR%\Mods\Crystar.QoL.dll" (
+if exist "!GAMEDIR!\Mods\Crystar.QoL.dll" (
     echo   [FAIL] Mods\Crystar.QoL.dll - close the game and try again
     set /a FAILED+=1
     exit /b 0
@@ -336,7 +336,7 @@ if not "%ENTRYCOUNT%"=="0" (
     exit /b 0
 )
 rd "%GAMEDIR%\Mods" 2>nul
-if exist "%GAMEDIR%\Mods\" (
+if exist "!GAMEDIR!\Mods\" (
     echo          Mods\ could not be removed - delete it by hand
 ) else (
     echo          Mods\ was empty - folder removed
@@ -348,7 +348,7 @@ rem  ==================================================================
 :cleanmoddir
 rem  UserData\Crystar.QoL - remove everything except backup\, which is the
 rem  whole point of keeping this folder alive.
-for %%E in ("%GAMEDIR%\UserData\Crystar.QoL\*") do (
+for %%E in ("!GAMEDIR!\UserData\Crystar.QoL\*") do (
     if /i not "%%~nxE"=="backup" (
         if /i not "%%~nxE"=="*" (
             if exist "%%~fE" (
@@ -364,14 +364,14 @@ for %%E in ("%GAMEDIR%\UserData\Crystar.QoL\*") do (
         )
     )
 )
-if exist "%GAMEDIR%\UserData\Crystar.QoL\backup\" (
+if exist "!GAMEDIR!\UserData\Crystar.QoL\backup\" (
     echo          kept: UserData\Crystar.QoL\backup\
     exit /b 0
 )
 call :countentries "%GAMEDIR%\UserData\Crystar.QoL"
 if "%ENTRYCOUNT%"=="0" (
-    rd "%GAMEDIR%\UserData\Crystar.QoL" 2>nul
-    if not exist "%GAMEDIR%\UserData\Crystar.QoL\" (
+    rd "!GAMEDIR!\UserData\Crystar.QoL" 2>nul
+    if not exist "!GAMEDIR!\UserData\Crystar.QoL\" (
         echo          UserData\Crystar.QoL\ was empty - folder removed
     )
 ) else (

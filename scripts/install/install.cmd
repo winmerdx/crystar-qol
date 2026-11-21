@@ -1,5 +1,5 @@
 @echo off
-setlocal
+setlocal enabledelayedexpansion
 title Crystar.QoL - Install
 
 rem  ==================================================================
@@ -38,7 +38,7 @@ echo   Package folder : %SELF%
 rem  ==================================================================
 rem  gate 1 - package structure intact?
 rem  ==================================================================
-if not exist "%PAYLOAD%\" (
+if not exist "!PAYLOAD!\" (
     echo   [ERROR] "payload" folder is missing next to this script.
     echo           The package is broken or was not extracted completely.
     echo.
@@ -62,8 +62,8 @@ set "PARENT="
 for %%I in ("%CUR%\..") do set "PARENT=%%~fI"
 if /i "%PARENT%"=="%CUR%" goto :walkend
 
-if exist "%PARENT%\CRYSTAR.exe" if exist "%PARENT%\CRYSTAR_Data" if exist "%PARENT%\GameAssembly.dll" (
-    set "GAMEDIR=%PARENT%"
+if exist "!PARENT!\CRYSTAR.exe" if exist "!PARENT!\CRYSTAR_Data" if exist "!PARENT!\GameAssembly.dll" (
+    set "GAMEDIR=!PARENT!"
     goto :walkend
 )
 
@@ -73,7 +73,7 @@ goto :walkup
 
 if not defined GAMEDIR (
     echo   [ERROR] Could not find the Crystar game folder above this package.
-    echo           Searched from %SELF% all the way up - no folder contains
+    echo           Searched from !SELF! all the way up - no folder contains
     echo           CRYSTAR.exe + CRYSTAR_Data + GameAssembly.dll together.
     echo.
     echo           Move the whole "Crystar.QoL" folder INTO the Crystar
@@ -93,7 +93,7 @@ echo   Game folder    : %GAMEDIR%
 rem  ==================================================================
 rem  gate 3 - refuse to install into a CRYSTAR_Data-like subfolder
 rem  ==================================================================
-if /i "%GAMEDIR:~-12%"=="\CRYSTAR_Data" (
+if /i "!GAMEDIR:~-12!"=="\CRYSTAR_Data" (
     echo   [ERROR] This looks like the CRYSTAR_Data folder.
     echo           The package must sit in the folder that contains CRYSTAR.exe.
     echo.
@@ -118,7 +118,7 @@ if not errorlevel 1 (
 rem  ==================================================================
 rem  warn if a framework install already exists (we only update files)
 rem  ==================================================================
-if exist "%GAMEDIR%\version.dll" (
+if exist "!GAMEDIR!\version.dll" (
     echo   [NOTE] Existing install detected - files will be updated.
     echo          Mods\ and UserData\ are preserved.
     echo.
@@ -139,7 +139,7 @@ if "%QUIET%"=="0" set /p "RESTORE=Restore them? [Y/n] "
 if /i "%RESTORE%"=="n" goto :norestore
 if not exist "%MODDIR%\" mkdir "%MODDIR%" >nul 2>&1
 for %%M in (settings.cfg gate.pause gate.patch overlay.off map.invert console.show) do (
-    if exist "%MODDIR%\backup\%%M" copy /y "%MODDIR%\backup\%%M" "%MODDIR%\%%M" >nul 2>&1
+    if exist "!MODDIR!\backup\%%M" copy /y "!MODDIR!\backup\%%M" "!MODDIR!\%%M" >nul 2>&1
 )
 echo     + settings.cfg (and marker files) restored from backup\
 :norestore
@@ -149,19 +149,19 @@ set "MANIFEST=%GAMEDIR%\CrystarQoL_MANIFEST.txt"
 >>"%MANIFEST%" echo [F] CrystarQoL_uninstall.cmd
 
 echo   Copying files...
-if exist "%PAYLOAD%\version.dll" (
-    copy /y "%PAYLOAD%\version.dll" "%GAMEDIR%\" >nul
-    >>"%MANIFEST%" echo [F] version.dll
+if exist "!PAYLOAD!\version.dll" (
+    copy /y "!PAYLOAD!\version.dll" "!GAMEDIR!\" >nul
+    >>"!MANIFEST!" echo [F] version.dll
     echo     + version.dll
 )
-if exist "%PAYLOAD%\NOTICE.txt" (
-    copy /y "%PAYLOAD%\NOTICE.txt" "%GAMEDIR%\" >nul
-    >>"%MANIFEST%" echo [F] NOTICE.txt
+if exist "!PAYLOAD!\NOTICE.txt" (
+    copy /y "!PAYLOAD!\NOTICE.txt" "!GAMEDIR!\" >nul
+    >>"!MANIFEST!" echo [F] NOTICE.txt
 )
 for %%D in (MelonLoader Mods) do (
-    if exist "%PAYLOAD%\%%D" (
-        xcopy /e /y /i /q "%PAYLOAD%\%%D" "%GAMEDIR%\%%D" >nul
-        >>"%MANIFEST%" echo [D] %%D
+    if exist "!PAYLOAD!\%%D" (
+        xcopy /e /y /i /q "!PAYLOAD!\%%D" "!GAMEDIR!\%%D" >nul
+        >>"!MANIFEST!" echo [D] %%D
         echo     + %%D\
     )
 )

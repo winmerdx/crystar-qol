@@ -9,11 +9,14 @@ install.cmd / uninstall.cmd 沙盒实测（**不碰真游戏目录**）。
   ② 本机 Windows 11（26100）的 `rmdir` **不带 /s 也会静默递归删掉非空目录**
      ⇒ 裸 `rd` 不能当"空目录判定"（现由 uninstall.cmd 的 `:countentries` 显式计数）。
 
-布局（自动创建，全部在 dist/sandbox 下）：
-    dist/sandbox/FakeGame/CRYSTAR.exe        (空文件，脚本只判存在)
-    dist/sandbox/FakeGame/CRYSTAR_Data/      (目录)
-    dist/sandbox/FakeGame/GameAssembly.dll   (空文件)
-    dist/sandbox/FakeGame/Crystar.QoL/       (包：install.cmd / uninstall.cmd / 使用说明.txt / payload)
+布局（自动创建，全部在 dist/sandbox 下）。假游戏目录的名字**故意带括号和空格**：
+真实安装路径是 `C:\Program Files (x86)\Steam\...`，而 `)` 会让 cmd 在解析 `( ... )`
+代码块时提前闭合 —— 曾经因此 install.cmd 直接 exit 255、一个文件都没装。
+沙箱目录名带括号，这条路径就能被回归测试覆盖到。
+    dist/sandbox/Fake Game (x86)/CRYSTAR.exe        (空文件，脚本只判存在)
+    dist/sandbox/Fake Game (x86)/CRYSTAR_Data/      (目录)
+    dist/sandbox/Fake Game (x86)/GameAssembly.dll   (空文件)
+    dist/sandbox/Fake Game (x86)/Crystar.QoL/       (包：install.cmd / uninstall.cmd / 使用说明.txt / payload)
 
 用法：
     python scripts/test_installer.py      # 退出码 0 = 全部通过
@@ -27,7 +30,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]          # crystar-mod
 SRC = ROOT / "scripts" / "install"
 SANDBOX = ROOT / "dist" / "sandbox"
-FAKE = SANDBOX / "FakeGame"
+FAKE = SANDBOX / "Fake Game (x86)"   # 括号+空格：复现真实 Steam 路径
 PKG = FAKE / "Crystar.QoL"
 LOG = SANDBOX / "test_report.txt"
 
