@@ -15,7 +15,11 @@ so the game plays like vanilla until you change something.
 
   Wrong location? The installer searches upward and stops with a message
   if it cannot find the game folder.
-  First launch is slower (proxy assemblies are generated once).
+  First launch is slower: the framework downloads IL2CPP proxy assemblies
+  once, which requires an internet connection. If a "component download
+  failed" window appears, enable an accelerator / switch network node and
+  start the game again - downloads resume, and only need to succeed once.
+  Players with working international access can ignore this note.
 
   Can't find the game folder? In Steam: right-click CRYSTAR
   -> Manage -> Browse local files.

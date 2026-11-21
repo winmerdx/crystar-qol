@@ -115,7 +115,7 @@ Both scripts are plain local Windows batch files; their source is in `scripts/in
 - `install.cmd` — verifies the package layout, locates the game folder by searching upward for `CRYSTAR.exe` + `CRYSTAR_Data` + `GameAssembly.dll`, refuses to run while the game is running (`tasklist`), copies `version.dll` / `MelonLoader\` / `Mods\` into the game folder, and records every added file in `CrystarQoL_MANIFEST.txt`.
 - `uninstall.cmd` — removes **only** the files listed in that manifest (element level: a shared `Mods\` folder is only removed when it ends up empty), plus a fixed set of MelonLoader-created names, after the same "game not running" check and an explicit typed confirmation.
 
-Neither script contains any network access: no `curl`, no `http`, no `powershell`, no registry writes — they only copy and delete files inside the game folder. `scripts/test_installer.py` exercises both scripts against a synthetic fake game folder (install → uninstall → reinstall) with assertions, so the destructive paths can be tested without touching a real install.
+Neither script contains any network access: no `curl`, no `http`, no `powershell`, no registry writes — they only copy and delete files inside the game folder. At the end of a successful install the installer prints a short, locale-aware (Chinese/English) reminder that the **first game launch** needs internet for MelonLoader to download IL2CPP proxy assemblies; this is a text-only notice printed by the installer, not a network check — the installer never contacts any server. If the download fails, players can enable an accelerator/change network node and restart the game; the download resumes and only needs to succeed once. `scripts/test_installer.py` exercises both scripts against a synthetic fake game folder (install → uninstall → reinstall) with assertions, so the destructive paths can be tested without touching a real install.
 
 ## Third-party components
 
@@ -124,6 +124,18 @@ See [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md). Short version: the frame
 ## License
 
 The mod's own source code is released under the **MIT License** — see [`LICENSE`](LICENSE). Third-party components keep their own licenses.
+
+## First launch and internet access
+
+The installer itself is fully offline. On **first launch**, however, the bundled
+MelonLoader 0.5.7 framework contacts its API and GitHub to download IL2CPP proxy
+assemblies (`Il2CppAssemblyGenerator`), which are then cached in the game folder.
+This is a one-off: once generated, no further download is needed. Players whose
+network cannot reach those endpoints may see a "component download failed"
+dialog at first launch; switching network nodes / using an accelerator and
+restarting the game resumes the download. This requirement is documented in the
+installer's end-of-install notice (Chinese or English, based on system locale)
+and in both player guides.
 
 ## 中文摘要
 
