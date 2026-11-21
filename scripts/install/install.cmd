@@ -182,16 +182,20 @@ for /f "tokens=3" %%A in ('reg query "HKCU\Control Panel\International" /v Local
 for /f "tokens=2 delims=:" %%p in ('chcp') do set "OLDPAGE=%%p"
 set "OLDPAGE=%OLDPAGE: =%"
 if /i "!LOC:~0,2!"=="zh" goto :notice_zh
+color 0E >nul
 echo   - First launch takes longer: the framework generates IL2CPP proxy
 echo     assemblies once. If a "component download failed" window appears,
 echo     enable an accelerator / switch network node, then start the game
 echo     again - downloads resume and only need to succeed once.
+color 07 >nul
 goto :notice_done
 :notice_zh
 chcp 65001 >nul
+color 0E >nul
 echo   - 首次启动较慢：框架会联网下载并生成 IL2CPP 代理组件（只需成功一次）。
 echo     若弹出「组件下载失败」的窗口，请开启加速器 / 更换网络节点后重新启动游戏，
 echo     组件会自动续传，下载成功一次后即可。
+color 07 >nul
 chcp %OLDPAGE% >nul
 :notice_done
 echo.
