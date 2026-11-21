@@ -3,9 +3,9 @@
 A quality-of-life mod for **CRYSTAR** (Spike Chunsoft, Unity IL2CPP), built on **MelonLoader 0.5.7** for .NET Framework 4.7.2.
 
 **NexusMods page:** https://www.nexusmods.com/crystar/mods/4
-**Current version:** 0.3-r27
+**Current version:** 0.3-r28
 **Author:** winmerdx
-**Download the released archive:** https://github.com/winmerdx/crystar-qol/releases/download/v0.3-r27/Crystar.QoL-v0.3-r27.zip
+**Download the released archive:** https://github.com/winmerdx/crystar-qol/releases/download/v0.3-r28/Crystar.QoL-v0.3-r28.zip
 
 This repository is the public source-code home of the mod. It exists so that the source, the build steps and the packaging pipeline of the released file are fully auditable — including the one place where a third-party binary is modified (see [The 6-byte console patch](#the-6-byte-console-patch)).
 
@@ -13,7 +13,7 @@ This repository is the public source-code home of the mod. It exists so that the
 
 ## What is in the released archive
 
-The release archive `Crystar.QoL-v0.3-r27.zip` (SHA-256 `174a4da1f9636d526c7f1490666b33f1bd653aee83994b89382aae8cf957402c`) is a single standard DEFLATE ZIP with one top-level folder:
+The release archive `Crystar.QoL-v0.3-r28.zip` (SHA-256 `fbb222707705f60ec8308a2e4b110f23c82a776b0a8f0bdcb49eeec25f652ba4`) is a single standard DEFLATE ZIP with one top-level folder:
 
 ```
 Crystar.QoL\
